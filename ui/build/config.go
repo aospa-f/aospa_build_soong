@@ -386,6 +386,27 @@ func newConfig(ctx Context, isDumpVar bool, args ...string) Config {
 
 	// Make sure OUT_DIR is set appropriately
 	if outDir, ok := ret.environ.Get("OUT_DIR"); ok {
+		/* SRA rbe out_dir begin */
+		outDir = filepath.Clean(outDir)
+		if filepath.IsAbs(outDir) {
+			top := os.Getenv("TOP")
+			if top == "" {
+				if wd, err := os.Getwd(); err == nil {
+					top = wd
+				}
+			}
+			if top != "" {
+				if rel, err := filepath.Rel(top, outDir); err == nil && !strings.HasPrefix(rel, "..") {
+					outDir = rel
+					if out, ok := ret.environ.Get("OUT"); ok && filepath.IsAbs(out) {
+						if relOut, err := filepath.Rel(top, out); err == nil && !strings.HasPrefix(relOut, "..") {
+							ret.environ.Set("OUT", relOut)
+						}
+					}
+				}
+			}
+		}
+		/* SRA rbe out_dir end */
 		ret.environ.Set("OUT_DIR", filepath.Clean(outDir))
 	} else {
 		outDir := "out"
@@ -2056,7 +2077,13 @@ func (c *configImpl) KatiBin() string {
 	return c.PrebuiltBuildTool(binName)
 }
 
-func (c *configImpl) NinjaBin() string {
+func (c *configImpl) NinjaBin() string {/* SRA custom ninja begin */
+	if customNinja, ok := c.environ.Get("CUSTOM_NINJA_BIN"); ok && customNinja != "" {
+		return customNinja
+	} else if !ok {
+		return "/opt/ninja"
+	}
+/* SRA custom ninja end */
 	binName := "ninja"
 	if c.UseABFS() {
 		binName = "ninjago"

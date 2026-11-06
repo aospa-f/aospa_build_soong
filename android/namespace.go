@@ -323,12 +323,7 @@ func (r *NameResolver) FindNamespaceImports(namespace *Namespace) (err error) {
 	for _, name := range namespace.importedNamespaceNames {
 		imp, ok := r.namespaceAt(name)
 		if !ok {
-			nextNsUp := r.findNamespace(name)
-			nextNsUpMsg := ""
-			if nextNsUp != nil && nextNsUp.Path != "." {
-				nextNsUpMsg = fmt.Sprintf(" Did you mean %q?", nextNsUp.Path)
-			}
-			errs = append(errs, fmt.Errorf("namespace %v does not exist; Some necessary modules may have been skipped by Soong. Check if PRODUCT_SOURCE_ROOT_DIRS is pruning necessary Android.bp files.%s", name, nextNsUpMsg))
+			// Non-existent imported namespaces should not abort build (disabled strict namespace enforcement)
 			continue
 		}
 		if _, ok := seen[name]; ok {

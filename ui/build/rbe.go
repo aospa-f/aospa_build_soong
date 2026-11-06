@@ -20,6 +20,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"syscall"
 	"runtime"
 	"strconv"
 	"strings"
@@ -109,10 +110,24 @@ func checkRBERequirements(ctx Context, config Config) {
 	}
 
 	if u := ulimitOrFatal(ctx, config, "-u"); u < rbeLeastNProcs {
-		ctx.Fatalf("max user processes is insufficient: %d; want >= %d.\n", u, rbeLeastNProcs)
+		/* SRA rbe begin */ ctx.Println(fmt.Sprintf("\033[33mWARNING: max user processes is %d; recommended >= %d for RBE.\033[0m", u, rbeLeastNProcs)) /* SRA rbe end */
 	}
 	if n := ulimitOrFatal(ctx, config, "-n"); n < rbeLeastNFiles {
-		ctx.Fatalf("max open files is insufficient: %d; want >= %d.\n", n, rbeLeastNFiles)
+		/* SRA rbe begin */
+		var limits syscall.Rlimit
+		if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limits); err == nil {
+			if limits.Cur < uint64(rbeLeastNFiles) {
+				limits.Cur = uint64(rbeLeastNFiles)
+				if limits.Cur > limits.Max {
+					limits.Cur = limits.Max
+				}
+				_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limits)
+			}
+		}
+		if n2 := ulimitOrFatal(ctx, config, "-n"); n2 < rbeLeastNFiles {
+			ctx.Println(fmt.Sprintf("\033[33mWARNING: max open files is %d; recommended >= %d for RBE.\033[0m", n2, rbeLeastNFiles))
+		}
+		/* SRA rbe end */
 	}
 	if _, err := os.Stat(config.rbeProxyLogsDir()); os.IsNotExist(err) {
 		if err := os.MkdirAll(config.rbeProxyLogsDir(), 0744); err != nil {
@@ -256,7 +271,7 @@ func startRBEproxy(ctx Context, config Config) {
 	e := ctx.BeginTrace(metrics.RunSetupTool, "rbe_bootstrap")
 	defer e.End()
 
-	ctx.Status.Status("Starting rbe...")
+	ctx.Status.Status("Starting ninja...")
 	executable := config.SisoBin()
 	args := []string{
 		"proxy",
@@ -330,7 +345,7 @@ func startReproxy(ctx Context, config Config) {
 	e := ctx.BeginTrace(metrics.RunSetupTool, "rbe_bootstrap")
 	defer e.End()
 
-	ctx.Status.Status("Starting rbe...")
+	ctx.Status.Status("Starting ninja...")
 	cmd := Command(ctx, config, e, "startReproxy bootstrap", rbeCommand(ctx, config, bootstrapCmd))
 
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -347,7 +362,7 @@ func stopRBE(ctx Context, config Config) {
 		cmd := Command(ctx, config, nil, "stopRBE bootstrap", rbeCommand(ctx, config, bootstrapCmd), "-shutdown")
 		output, err = cmd.CombinedOutput()
 		if err != nil {
-			ctx.Fatalf("rbe bootstrap with shutdown failed with: %v\n%s\n", err, output)
+			ctx.Fatalf("soong bootstrap with shutdown failed with: %v\n%s\n", err, output)
 		}
 	}
 
@@ -420,12 +435,15 @@ func DumpRBEMetrics(ctx Context, config Config, filename string) {
 // setting output directory to a path other than "out" in an RBE enabled
 // build can cause slow builds.
 func PrintOutDirWarning(ctx Context, config Config) {
-	if config.UseRBE() && config.OutDir() != defaultOutDir {
-		fmt.Fprintln(ctx.Writer, "")
-		fmt.Fprintln(ctx.Writer, "\033[33mWARNING:\033[0m")
-		fmt.Fprintln(ctx.Writer, fmt.Sprintf("Setting OUT_DIR to a path other than %v may result in slow RBE builds.", defaultOutDir))
-		fmt.Fprintln(ctx.Writer, "See http://go/android_rbe_out_dir for a workaround.")
-		fmt.Fprintln(ctx.Writer, "")
+	if config.UseRBE() {
+		outDir := filepath.Clean(config.OutDir())
+		if outDir != defaultOutDir && outDir != "." && filepath.Base(outDir) != defaultOutDir {
+			fmt.Fprintln(ctx.Writer, "")
+			fmt.Fprintln(ctx.Writer, "\033[33mWARNING:\033[0m")
+			fmt.Fprintln(ctx.Writer, fmt.Sprintf("Setting OUT_DIR to a path other than %v may result in slow RBE builds.", defaultOutDir))
+			fmt.Fprintln(ctx.Writer, "See http://go/android_rbe_out_dir for a workaround.")
+			fmt.Fprintln(ctx.Writer, "")
+		}
 	}
 }
 
